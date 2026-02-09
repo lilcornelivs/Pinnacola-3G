@@ -18,7 +18,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # !!! INCOLLA QUI SOTTO IL NUOVO LINK APPS SCRIPT !!!
-API_URL = "INCOLLA_QUI_IL_TUO_NUOVO_LINK_EXEC"
+API_URL = "https://script.google.com/macros/s/AKfycbwpf7wgfolPCrBIILdiuUVYBfeJNiLoWQV_eV5-H7udMBMXkms7DeD3KYjxyoiQoc3BfA/exec"
 
 def get_data():
     cols = ["partita", "mano", "p1", "p2", "p3", "chi"]
