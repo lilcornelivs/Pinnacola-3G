@@ -3,9 +3,9 @@ import pandas as pd
 import requests
 import time
 
-st.set_page_config(page_title="Triello Pinnacola", layout="wide")
+st.set_page_config(page_title="Triello Mufi-Mina-Corni", layout="wide")
 
-# CSS ANTI-APPANNAMENTO
+# CSS PER STABILIZZARE LO SCHERMO
 st.markdown("""
     <style>
     [data-stale="true"], div[data-fragment-id], [data-testid="stAppViewBlockContainer"] > div {
@@ -17,7 +17,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # !!! INCOLLA QUI IL NUOVO LINK APPS SCRIPT !!!
-API_URL = "https://script.google.com/macros/s/AKfycbwxYgc7EvSqSCqfcKwoddtnWRXnWTmmc75l2C5APziOfw-4TUBvZI99uwn3Y_1VrtYp3Q/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbwal0WLyedh8EuH5mdhIrnX36hH3FzMK9i3FCwR5HpVNMGZvGpVkg11kbF3ZEf6l43CpA/exec"
 
 def get_data():
     cols = ["partita", "mano", "p1", "p2", "p3", "chi"]
@@ -36,38 +36,49 @@ def get_data():
 
 # --- CARICAMENTO CONFIGURAZIONE ---
 df_init = get_data()
-target_default = 1500
-mode_default = 0 # 0 = Punti, 1 = Mani
+soglia_default = 1500
+mode_default = 0   # 0 = A Soglia, 1 = Numero Fisso
+num_partite_target = 3 # Default 3 partite
 
 if not df_init.empty:
     c_rows = df_init[df_init['chi'] == 'CONFIG']
     if not c_rows.empty:
-        # Colonna 'partita' ha il valore, colonna 'mano' ha la modalità
-        target_default = int(c_rows.iloc[-1]['partita'])
-        mode_default = int(c_rows.iloc[-1]['mano'])
+        last_conf = c_rows.iloc[-1]
+        soglia_default = int(last_conf['partita']) # Colonna 1
+        mode_default = int(last_conf['mano'])      # Colonna 2
+        num_partite_target = int(last_conf['p1'])  # Colonna 3
 
-# --- SIDEBAR (Scelta Modalità) ---
+# --- SIDEBAR IMPOSTAZIONI ---
 with st.sidebar:
-    st.header("Impostazioni Partita")
+    st.header("Impostazioni")
     
-    # Selettore Modalità
-    modo_scelto_str = st.radio("Modalità di Gioco:", ["A Punti (Soglia)", "Numero di Mani Fisse"], 
-                               index=0 if mode_default == 0 else 1)
+    # Scelta Modalità
+    modo_scelto = st.radio("Modalità di Gioco:", ["A Punti (Soglia)", "Numero Fisso di Partite"], 
+                           index=0 if mode_default == 0 else 1)
     
-    valore_impostato = 0
-    modo_code = 0
+    valore_soglia = 1500
+    valore_partite = 3
     
-    if modo_scelto_str == "A Punti (Soglia)":
-        modo_code = 0
-        valore_impostato = st.number_input("Soglia Vittoria", value=target_default if mode_default==0 else 1500, step=100)
+    if modo_scelto == "A Punti (Soglia)":
+        valore_soglia = st.number_input("Punti per vincere", value=soglia_default if mode_default==0 else 1500, step=100)
+        # Se siamo in modo soglia, il target partite non conta, ma lo passiamo comunque
+        valore_partite = num_partite_target
+        new_mode = 0
     else:
-        modo_code = 1
-        valore_impostato = st.number_input("Numero di Mani da giocare", value=target_default if mode_default==1 else 3, step=1)
+        st.info("In questa modalità giocherete un numero fisso di mani (che chiamiamo Partite). Alla fine vince chi ha più punti.")
+        valore_partite = st.number_input("Quante Partite vuoi giocare?", value=num_partite_target if mode_default==1 else 3, step=1)
+        valore_soglia = soglia_default # Manteniamo la vecchia soglia per memoria
+        new_mode = 1
 
-    if st.button("💾 Salva Impostazioni"):
-        # Salviamo sia il valore che la modalità
-        requests.post(API_URL, json={"action": "set_config", "valore": int(valore_impostato), "modalita": modo_code})
-        st.success(f"Impostato: {modo_scelto_str} a {valore_impostato}")
+    if st.button("💾 Salva e Riavvia"):
+        # Salviamo tutto nel database
+        requests.post(API_URL, json={
+            "action": "set_config", 
+            "valore": int(valore_soglia), 
+            "modalita": int(new_mode),
+            "num_partite": int(valore_partite)
+        })
+        st.success("Configurazione Salvata!")
         time.sleep(1)
         st.rerun()
         
@@ -78,95 +89,100 @@ with st.sidebar:
 
 # Titolo Dinamico
 if mode_default == 0:
-    st.title(f"🃏 Triello a Punti (Soglia: {target_default})")
+    st.title(f"🃏 Pinnacola a Punti (Vince chi fa {soglia_default})")
 else:
-    st.title(f"🃏 Triello a Mani (Totale Mani: {target_default})")
+    st.title(f"🃏 Pinnacola a Partite Fisse (Totale: {num_partite_target})")
 
 # --- DASHBOARD TEMPO REALE ---
 @st.fragment(run_every="2s") 
-def live_dashboard(target, mode):
+def live_dashboard(target_pts, target_games, mode):
     data = get_data()
+    # Filtriamo i dati puliti (senza config e senza vecchie vittorie salvate)
     df_p = data[~data['chi'].isin(['CONFIG', 'WIN_MUFI', 'WIN_MINA', 'WIN_CORNI'])] if not data.empty else data
     
+    # Conteggio Coppe (Medagliere storico)
     v_mufi = len(data[data['chi'] == 'WIN_MUFI']) if not data.empty else 0
     v_mina = len(data[data['chi'] == 'WIN_MINA']) if not data.empty else 0
     v_corni = len(data[data['chi'] == 'WIN_CORNI']) if not data.empty else 0
     
-    n_p, t1, t2, t3, mani_giocate = 1, 0, 0, 0, 0
+    n_p, t1, t2, t3, giocate_attuali = 1, 0, 0, 0, 0
+    
     if not df_p.empty:
-        n_p = int(df_p['partita'].max())
+        n_p = int(df_p['partita'].max()) # Questo è l'ID del torneo corrente
         curr = df_p[df_p['partita'] == n_p]
-        # Escludiamo lo START per contare le mani giocate
-        curr_mani = curr[curr['chi'] != 'START']
-        mani_giocate = len(curr_mani)
+        
+        # Escludiamo la riga START per contare quante mani/partite abbiamo giocato
+        giocate_df = curr[curr['chi'] != 'START']
+        giocate_attuali = len(giocate_df)
+        
         t1, t2, t3 = curr['p1'].sum(), curr['p2'].sum(), curr['p3'].sum()
 
-    # Visualizzazione Medagliere
+    # Visualizzazione Coppe
     c1, c2, c3 = st.columns(3)
     c1.subheader(f"🏆 Mufi: {v_mufi}")
     c2.subheader(f"🏆 Mina: {v_mina}")
     c3.subheader(f"🏆 Corni: {v_corni}")
     st.divider()
     
-    # Visualizzazione Punteggi
+    # Barra progresso se siamo a Partite Fisse
+    if mode == 1:
+        st.write(f"📊 **Stato Torneo:** Giocata partita **{giocate_attuali}** su **{target_games}**")
+        if target_games > 0:
+            st.progress(min(giocate_attuali / target_games, 1.0))
+    
+    # Punteggi Correnti
     m1, m2, m3 = st.columns(3)
     m1.metric("MUFI", int(t1))
     m2.metric("MINA", int(t2))
     m3.metric("CORNI", int(t3))
     
-    # Info extra se a mani fisse
-    if mode == 1:
-        st.progress(min(mani_giocate / target, 1.0))
-        st.caption(f"Mano {mani_giocate} su {target}")
-
     st.divider()
-    st.subheader("📜 Storico Partita")
+    st.subheader("📜 Storico (Ultime giocate)")
     if not df_p.empty:
         disp = df_p[(df_p['partita'] == n_p) & (~df_p['chi'].isin(['START']))].sort_values(by="mano", ascending=False)
         st.table(disp[['partita', 'mano', 'p1', 'p2', 'p3', 'chi']].rename(
-            columns={'partita':'Partita','mano':'Mano','p1':'Mufi','p2':'Mina','p3':'Corni','chi':'Chiusura'}
+            columns={'partita':'Torneo ID','mano':'Partita N.','p1':'Mufi','p2':'Mina','p3':'Corni','chi':'Chi ha chiuso'}
         ))
-    return n_p, t1, t2, t3, mani_giocate
+    return n_p, t1, t2, t3, giocate_attuali
 
-n_partita, tot1, tot2, tot3, mani_attuali = live_dashboard(target_default, mode_default)
+n_torneo, tot1, tot2, tot3, partite_fatte = live_dashboard(soglia_default, num_partite_target, mode_default)
 
-# --- LOGICA DI GIOCO (IBRIDA) ---
+# --- LOGICA DI GIOCO ---
 game_over = False
-max_punti = max(tot1, tot2, tot3)
-messaggio_vittoria = ""
-vincitore_code = ""
 
 if mode_default == 0:
-    # --- MODALITÀ SOGLIA PUNTI ---
-    if max_punti >= target_default:
-        count_max = [tot1, tot2, tot3].count(max_punti)
-        if count_max > 1:
-            st.warning(f"⚠️ Pareggio a {max_punti}! Si continua finché uno supera gli altri.")
+    # --- MODALITÀ SOGLIA ---
+    max_p = max(tot1, tot2, tot3)
+    if max_p >= soglia_default:
+        if [tot1, tot2, tot3].count(max_p) > 1:
+            st.warning(f"⚠️ Pareggio a {max_p}! Si continua.")
         else:
             game_over = True
 else:
-    # --- MODALITÀ MANI FISSE ---
-    if mani_attuali >= target_default:
+    # --- MODALITÀ NUMERO FISSO ---
+    # Se abbiamo giocato il numero di partite richiesto (o di più), finisce.
+    if partite_fatte >= num_partite_target:
         game_over = True
-        # Qui i pareggi sono accettati
 
 if not game_over:
     st.write("---")
-    st.subheader("📝 Registra Mano")
+    st.subheader("📝 Registra Risultato Partita")
     
+    # Input Campi
     col1, col2, col3, col4 = st.columns(4)
     val1 = col1.number_input("Punti Mufi", value=None, placeholder="...", step=5, key="i_mufi", min_value=-5000)
     val2 = col2.number_input("Punti Mina", value=None, placeholder="...", step=5, key="i_mina", min_value=-5000)
     val3 = col3.number_input("Punti Corni", value=None, placeholder="...", step=5, key="i_corni", min_value=-5000)
     chi_chiude = col4.selectbox("Chi ha chiuso?", ["Nessuno", "Mufi", "Mina", "Corni"], key="i_chi")
     
-    if st.button("REGISTRA MANO", type="primary"):
+    if st.button("REGISTRA PARTITA", type="primary"):
+        # Calcolo ID progressivo della "mano" (che qui chiamiamo Partita nel torneo)
         temp_df = get_data()
-        mani_partita = temp_df[(temp_df['partita'] == n_partita) & (~temp_df['chi'].isin(['START', 'WIN_MUFI', 'WIN_MINA', 'WIN_CORNI', 'CONFIG']))]
-        nuova_mano = len(mani_partita) + 1
+        mani_reali = temp_df[(temp_df['partita'] == n_torneo) & (~temp_df['chi'].isin(['START', 'WIN_MUFI', 'WIN_MINA', 'WIN_CORNI', 'CONFIG']))]
+        nuova_mano_id = len(mani_reali) + 1
         
         requests.post(API_URL, json={
-            "action": "add", "partita": n_partita, "mano": nuova_mano,
+            "action": "add", "partita": n_torneo, "mano": nuova_mano_id,
             "p1": val1 if val1 else 0, 
             "p2": val2 if val2 else 0, 
             "p3": val3 if val3 else 0, 
@@ -175,36 +191,43 @@ if not game_over:
         st.rerun()
 
 else:
-    # --- FINE PARTITA ---
+    # --- FINE TORNEO / FINE SOGLIA ---
     st.balloons()
     
-    # Calcolo Vincitori (Gestione Parimerito)
-    vincitori = []
-    if tot1 == max_punti: vincitori.append("Mufi")
-    if tot2 == max_punti: vincitori.append("Mina")
-    if tot3 == max_punti: vincitori.append("Corni")
+    # Calcolo Classifica Finale
+    classifica = [
+        {"nome": "Mufi", "punti": tot1},
+        {"nome": "Mina", "punti": tot2},
+        {"nome": "Corni", "punti": tot3}
+    ]
+    # Ordina decrescente
+    classifica.sort(key=lambda x: x["punti"], reverse=True)
     
-    if len(vincitori) == 1:
-        st.success(f"🏆 {vincitori[0].upper()} HA VINTO!")
-        if vincitori[0] == "Mufi": vincitore_code = "WIN_MUFI"
-        elif vincitori[0] == "Mina": vincitore_code = "WIN_MINA"
-        else: vincitore_code = "WIN_CORNI"
+    st.title("🏁 TORNEO COMPLETATO!")
+    st.subheader("🥇 PODIO FINALE")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("🥇 1° POSTO", f"{classifica[0]['nome']}", f"{classifica[0]['punti']} pts")
+    col2.metric("🥈 2° POSTO", f"{classifica[1]['nome']}", f"{classifica[1]['punti']} pts")
+    col3.metric("🥉 3° POSTO", f"{classifica[2]['nome']}", f"{classifica[2]['punti']} pts")
+    
+    # Determinazione vincitore per il Medagliere
+    # Se c'è pareggio al primo posto, gestiamo:
+    if classifica[0]["punti"] == classifica[1]["punti"]:
+        st.warning("⚠️ PAREGGIO AL PRIMO POSTO! Nessuna coppa assegnata automaticamente.")
+        win_code = "DRAW"
     else:
-        # CASO PAREGGIO (A mani fisse)
-        nomi = " e ".join(vincitori)
-        st.warning(f"🤝 PAREGGIO TRA: {nomi.upper()}!")
-        vincitore_code = "DRAW" # O puoi decidere di non assegnare coppe
-        
-    st.metric("Punteggio Finale", f"{tot1} - {tot2} - {tot3}")
+        winner = classifica[0]["nome"]
+        if winner == "Mufi": win_code = "WIN_MUFI"
+        elif winner == "Mina": win_code = "WIN_MINA"
+        else: win_code = "WIN_CORNI"
     
-    if st.button("🏁 SALVA E NUOVA PARTITA"):
-        # Se è pareggio, magari non salviamo la coppa, o salviamo una riga speciale DRAW
-        # Qui salvo la vittoria solo se c'è un vincitore unico, oppure puoi decidere tu
-        if len(vincitori) == 1:
-            requests.post(API_URL, json={"action": "add", "partita": n_partita, "mano": 999, "p1":0,"p2":0,"p3":0, "chi": vincitore_code})
-        else:
-             # Se vuoi contare i pareggi, potresti inventarti WIN_DRAW, ma per ora non conta nulla nel medagliere
-             requests.post(API_URL, json={"action": "add", "partita": n_partita, "mano": 999, "p1":0,"p2":0,"p3":0, "chi": "DRAW"})
-
-        requests.post(API_URL, json={"action": "add", "partita": n_partita + 1, "mano": 0, "p1":0,"p2":0,"p3":0, "chi": "START"})
+    st.write("---")
+    if st.button("🏆 SALVA VITTORIA E INIZIA NUOVO TORNEO"):
+        # 1. Salva la coppa
+        if win_code != "DRAW":
+            requests.post(API_URL, json={"action": "add", "partita": n_torneo, "mano": 999, "p1":0,"p2":0,"p3":0, "chi": win_code})
+        
+        # 2. Inizia nuovo torneo (ID + 1)
+        requests.post(API_URL, json={"action": "add", "partita": n_torneo + 1, "mano": 0, "p1":0,"p2":0,"p3":0, "chi": "START"})
         st.rerun()
